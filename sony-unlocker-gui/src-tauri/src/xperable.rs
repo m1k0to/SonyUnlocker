@@ -166,7 +166,8 @@ pub async fn run_exploit(app: AppHandle) -> Result<ExploitResult, String> {
     };
 
     // Step 2: Run the exploit
-    let (code, stdout2, stderr2) = run_xperable(&app, &["-B", "-U", exploit_flag])?;
+    // -B sets up the target (required before test4/test5), then exploit_flag runs the actual exploit
+    let (code, stdout2, stderr2) = run_xperable(&app, &["-B", exploit_flag])?;
     let all_output = format!("{}\n{}", stdout2, stderr2);
     let log_lines: Vec<String> = all_output.lines().map(|l| l.to_string()).collect();
 
