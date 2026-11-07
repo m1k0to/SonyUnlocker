@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Sony Unlocker</title>
+    <link rel="stylesheet" href="/src/styles.css" />
+  </head>
+  <body>
+    <div id="app">
+      <header class="app-header">
+        <h1>Sony Unlocker</h1>
+        <p class="subtitle">Xperia Bootloader Unlock Tool</p>
+      </header>
+
+      <main class="app-main">
+        <!-- Status Panel -->
+        <section class="panel status-panel">
+          <h2>Device Status</h2>
+          <div id="device-status" class="status-content">
+            <p class="status-disconnected">No device detected</p>
+          </div>
+          <button id="btn-detect" class="btn btn-secondary">Detect Device</button>
+        </section>
+
+        <!-- Device Info Panel -->
+        <section class="panel device-panel" id="device-info-panel" style="display:none">
+          <h2>Device Information</h2>
+          <div class="info-grid">
+            <div class="info-item"><span class="label">Product</span><span id="info-product" class="value">—</span></div>
+            <div class="info-item"><span class="label">Platform</span><span id="info-platform" class="value">—</span></div>
+            <div class="info-item"><span class="label">Bootloader</span><span id="info-bootloader" class="value">—</span></div>
+            <div class="info-item"><span class="label">Baseband</span><span id="info-baseband" class="value">—</span></div>
+            <div class="info-item"><span class="label">Locked</span><span id="info-locked" class="value">—</span></div>
+            <div class="info-item"><span class="label">Secure</span><span id="info-secure" class="value">—</span></div>
+          </div>
+        </section>
+
+        <!-- Actions Panel -->
+        <section class="panel actions-panel" id="actions-panel" style="display:none">
+          <h2>Actions</h2>
+          <div class="warning-box">
+            <strong>⚠ Warning:</strong> These operations modify your device's bootloader state.
+            Make sure you understand the risks before proceeding.
+          </div>
+          <div class="action-buttons">
+            <button id="btn-exploit" class="btn btn-primary">Run Exploit</button>
+            <button id="btn-unlock" class="btn btn-danger" disabled>Unlock Bootloader</button>
+            <button id="btn-relock" class="btn btn-warning" disabled>Re-lock Bootloader</button>
+          </div>
+        </section>
+
+        <!-- Log Panel -->
+        <section class="panel log-panel">
+          <h2>Log Output</h2>
+          <pre id="log-output" class="log-output"></pre>
+        </section>
+      </main>
+    </div>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>

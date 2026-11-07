@@ -1,0 +1,19 @@
+# Rust / Tauri
+sony-unlocker-gui/src-tauri/target/
+sony-unlocker-gui/src-tauri/gen/
+
+# Node
+sony-unlocker-gui/node_modules/
+sony-unlocker-gui/dist/
+
+# Build artifacts
+*.o
+*.a
+
+# macOS
+.DS_Store
+
+# Upstream build outputs (keep source, ignore binaries)
+upstream-xperable/xperable
+upstream-xperable/*.o
+upstream-xperable/
