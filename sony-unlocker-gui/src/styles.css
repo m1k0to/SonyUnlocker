@@ -217,3 +217,107 @@ body {
   background: var(--border);
   border-radius: 3px;
 }
+
+/* Workflow: completion is conveyed by a check mark as well as color. */
+.progress-panel { padding: 16px 8px; }
+.step-progress {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  list-style: none;
+}
+.progress-step {
+  position: relative;
+  display: flex;
+  align-items: center;
+  flex-direction: column;
+  gap: 8px;
+  color: var(--text-muted);
+  text-align: center;
+}
+.progress-step:not(:first-child)::before {
+  content: "";
+  position: absolute;
+  top: 14px;
+  left: -50%;
+  width: 100%;
+  height: 2px;
+  background: var(--border);
+}
+.step-marker {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border: 2px solid var(--border);
+  border-radius: 50%;
+  background: var(--bg-panel);
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+.step-label { font-size: 0.8rem; line-height: 1.4; }
+.progress-step.is-current { color: var(--accent-hover); font-weight: 600; }
+.is-current .step-marker { color: var(--accent); border-color: var(--accent); }
+.progress-step.is-complete { color: var(--success); }
+.is-complete .step-marker { border-color: var(--success); }
+.progress-step.is-current::before { background: var(--accent); height: 4px; top: 13px; }
+.progress-step.is-complete::before { background: var(--success); height: 4px; top: 13px; }
+
+.status-content { margin-bottom: 12px; line-height: 1.5; overflow-wrap: anywhere; }
+.feedback-card {
+  margin-top: 14px;
+  padding: 12px 14px;
+  border: 1px solid currentColor;
+  border-left-width: 4px;
+  border-radius: var(--radius);
+  background: var(--bg);
+  font-size: 0.85rem;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+  user-select: text;
+  -webkit-user-select: text;
+}
+.feedback-card[hidden] { display: none; }
+.feedback-error { color: var(--danger-hover); border-color: var(--danger); }
+.feedback-success { color: var(--text); border-color: var(--success); }
+.feedback-success .feedback-title { color: var(--success); }
+.feedback-info { color: var(--accent-hover); border-color: var(--accent); }
+.feedback-title { font-weight: 600; }
+.feedback-card p + p:not(:empty) { margin-top: 6px; color: var(--text); }
+.feedback-card .btn { margin-top: 10px; }
+
+.btn { gap: 8px; min-height: 36px; }
+.btn:focus-visible { outline: 2px solid var(--accent-hover); outline-offset: 3px; }
+.btn.is-loading:disabled { opacity: 0.8; cursor: wait; }
+.btn.is-loading::before {
+  content: "";
+  width: 14px;
+  height: 14px;
+  flex: 0 0 14px;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: button-spin 0.7s linear infinite;
+}
+@keyframes button-spin { to { transform: rotate(360deg); } }
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+@media (max-width: 480px) {
+  #app { padding: 12px; }
+  .step-label { font-size: 0.7rem; }
+  .action-buttons .btn { flex: 1 1 100%; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .btn { transition: none; }
+  .btn.is-loading::before { animation-duration: 2s; }
+}

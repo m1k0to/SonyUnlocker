@@ -17,11 +17,34 @@
         <!-- Status Panel -->
         <section class="panel status-panel">
           <h2>Device Status</h2>
-          <div id="device-status" class="status-content">
+          <div id="device-status" class="status-content" role="status" aria-live="polite" aria-atomic="true">
             <p class="status-disconnected">No device detected</p>
           </div>
-          <button id="btn-detect" class="btn btn-secondary">Detect Device</button>
+          <button id="btn-detect" class="btn btn-secondary" aria-label="Detect Device">Detect Device</button>
+          <div id="status-error-panel" class="feedback-card feedback-error" role="alert" aria-live="assertive" aria-atomic="true" hidden>
+            <p id="status-error-message" lang="zh-CN"></p>
+            <button id="btn-retry" class="btn btn-secondary" aria-label="重试检测设备" lang="zh-CN">重试</button>
+          </div>
         </section>
+
+        <!-- Workflow progress -->
+        <nav class="panel progress-panel" aria-label="设备解锁流程" lang="zh-CN">
+          <ol class="step-progress">
+            <li class="progress-step is-current" aria-current="step" aria-label="检测设备：当前步骤">
+              <span class="step-marker" aria-hidden="true">●</span><span class="step-label">检测设备</span>
+            </li>
+            <li class="progress-step" aria-label="读取信息：未开始">
+              <span class="step-marker" aria-hidden="true">2</span><span class="step-label">读取信息</span>
+            </li>
+            <li class="progress-step" aria-label="运行 Exploit：未开始">
+              <span class="step-marker" aria-hidden="true">3</span><span class="step-label">运行 Exploit</span>
+            </li>
+            <li class="progress-step" aria-label="解锁/重锁：未开始">
+              <span class="step-marker" aria-hidden="true">4</span><span class="step-label">解锁/重锁</span>
+            </li>
+          </ol>
+          <p id="step-summary" class="sr-only" aria-live="polite" aria-atomic="true">当前步骤：检测设备</p>
+        </nav>
 
         <!-- Device Info Panel -->
         <section class="panel device-panel" id="device-info-panel" style="display:none">
@@ -44,9 +67,13 @@
             Make sure you understand the risks before proceeding.
           </div>
           <div class="action-buttons">
-            <button id="btn-exploit" class="btn btn-primary">Run Exploit</button>
-            <button id="btn-unlock" class="btn btn-danger" disabled>Unlock Bootloader</button>
-            <button id="btn-relock" class="btn btn-warning" disabled>Re-lock Bootloader</button>
+            <button id="btn-exploit" class="btn btn-primary" aria-label="Run Exploit" disabled>Run Exploit</button>
+            <button id="btn-unlock" class="btn btn-danger" aria-label="Unlock Bootloader" disabled>Unlock Bootloader</button>
+            <button id="btn-relock" class="btn btn-warning" aria-label="Re-lock Bootloader" disabled>Re-lock Bootloader</button>
+          </div>
+          <div id="action-result" class="feedback-card" role="status" aria-live="polite" aria-atomic="true" lang="zh-CN" hidden>
+            <p id="action-result-message" class="feedback-title"></p>
+            <p id="action-result-detail"></p>
           </div>
         </section>
 

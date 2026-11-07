@@ -32,34 +32,43 @@ pub async fn check_xperable_binary(app: AppHandle) -> Result<String, String> {
     Ok(bin_path.to_string_lossy().to_string())
 }
 
+/// Check that a path is a regular file with execute permission
+fn is_executable(path: &std::path::Path) -> bool {
+    use std::os::unix::fs::PermissionsExt;
+    match std::fs::metadata(path) {
+        Ok(meta) if meta.is_file() => meta.permissions().mode() & 0o111 != 0,
+        _ => false,
+    }
+}
+
 /// Locate the xperable binary relative to the app bundle or in PATH
 fn find_xperable_binary(app: &AppHandle) -> Result<PathBuf, String> {
-    // 1. Check alongside the app binary (bundled)
+    // 1. Check alongside the app binary (bundled — most trusted)
     if let Ok(exe) = std::env::current_exe() {
         let dir = exe.parent().unwrap_or(std::path::Path::new("."));
         let candidate = dir.join("xperable");
-        if candidate.exists() {
+        if is_executable(&candidate) {
             return Ok(candidate);
         }
         // macOS .app bundle: Contents/MacOS/../Resources/xperable
         let resources = dir.join("../Resources/xperable");
-        if resources.exists() {
+        if is_executable(&resources) {
             return Ok(resources);
         }
     }
     // 2. Check resource dir from tauri
     if let Ok(resource_dir) = app.path().resource_dir() {
         let candidate = resource_dir.join("xperable");
-        if candidate.exists() {
+        if is_executable(&candidate) {
             return Ok(candidate);
         }
     }
-    // 3. Fallback: look in PATH
-    if let Ok(output) = std::process::Command::new("which").arg("xperable").output() {
-        if output.status.success() {
-            let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
-            if !path.is_empty() {
-                return Ok(PathBuf::from(path));
+    // 3. Fallback: search PATH directories directly (no subprocess)
+    if let Ok(path_var) = std::env::var("PATH") {
+        for dir in path_var.split(':') {
+            let candidate = PathBuf::from(dir).join("xperable");
+            if is_executable(&candidate) {
+                return Ok(candidate);
             }
         }
     }
@@ -74,10 +83,16 @@ async fn run_xperable(app: &AppHandle, args: &[&str]) -> Result<(i32, String, St
     let bin = find_xperable_binary(app)?;
     log::info!("Running xperable: {:?} {:?}", bin, args);
 
+    // Set working directory to the binary's parent so relative payload paths
+    // (LinuxLoader-*.pe, target-*.c) resolve correctly.
+    let work_dir = bin.parent().unwrap_or(std::path::Path::new("."));
+
     let child = Command::new(&bin)
         .args(args)
+        .current_dir(work_dir)
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
+        .kill_on_drop(true)
         .spawn()
         .map_err(|e| format!("Failed to execute xperable: {}", e))?;
 
@@ -100,8 +115,8 @@ async fn run_xperable(app: &AppHandle, args: &[&str]) -> Result<(i32, String, St
     Ok((code, stdout, stderr))
 }
 
-/// Parse the output of xperable -A into structured DeviceInfo
-fn parse_getvar_all(stderr: &str) -> DeviceInfo {
+/// Parse the combined stdout+stderr output of xperable -A into structured DeviceInfo
+fn parse_getvar_all(output: &str) -> DeviceInfo {
     let mut info = DeviceInfo {
         unlocked: None,
         bootloader_version: None,
@@ -111,10 +126,14 @@ fn parse_getvar_all(stderr: &str) -> DeviceInfo {
         platform: None,
     };
 
-    for line in stderr.lines() {
+    for line in output.lines() {
         let line = line.trim();
         if let Some(val) = line.strip_prefix("unlocked:") {
-            info.unlocked = Some(val.trim() == "yes");
+            info.unlocked = match val.trim() {
+                "yes" => Some(true),
+                "no" => Some(false),
+                _ => None,
+            };
         } else if let Some(val) = line.strip_prefix("version-bootloader:") {
             let v = val.trim().to_string();
             // Detect platform from bootloader string
@@ -129,7 +148,11 @@ fn parse_getvar_all(stderr: &str) -> DeviceInfo {
         } else if let Some(val) = line.strip_prefix("product:") {
             info.product = Some(val.trim().to_string());
         } else if let Some(val) = line.strip_prefix("secure:") {
-            info.secure = Some(val.trim() == "yes");
+            info.secure = match val.trim() {
+                "yes" => Some(true),
+                "no" => Some(false),
+                _ => None,
+            };
         }
     }
     info
@@ -138,13 +161,20 @@ fn parse_getvar_all(stderr: &str) -> DeviceInfo {
 /// Detect if a Sony device is connected in fastboot mode
 #[tauri::command]
 pub async fn detect_device(app: AppHandle) -> Result<bool, String> {
-    // Try running xperable -B; if it succeeds, device is present
+    // -B calls getvar_single which outputs to stdout via POUT
     let result = run_xperable(&app, &["-B"]).await;
     match result {
-        Ok((code, _, stderr)) => {
-            Ok(code == 0 && stderr.contains("version-bootloader:"))
+        Ok((code, stdout, _stderr)) => {
+            Ok(code == 0 && stdout.contains("version-bootloader:"))
         }
-        Err(_) => Ok(false),
+        Err(e) => {
+            // Distinguish binary-not-found from device-not-found
+            if e.contains("not found") || e.contains("execute") {
+                Err(e)
+            } else {
+                Ok(false)
+            }
+        }
     }
 }
 
@@ -202,20 +232,40 @@ pub async fn run_exploit(app: AppHandle) -> Result<ExploitResult, String> {
 /// Unlock bootloader (requires exploit to have run first)
 #[tauri::command]
 pub async fn unlock_bootloader(app: AppHandle) -> Result<ExploitResult, String> {
-    let (code, stdout, stderr) = run_xperable(
+    // Step 1: Send the unlock command only (no reboot yet)
+    let (code1, stdout1, stderr1) = run_xperable(
         &app,
-        &["-B", "-c", "oem unlock Y", "-1", "-c", "reboot", "-1"],
+        &["-B", "-c", "oem unlock Y", "-1"],
     ).await?;
-    let all_output = format!("{}\n{}", stdout, stderr);
-    let log_lines: Vec<String> = all_output.lines().map(|l| l.to_string()).collect();
+    let out1 = format!("{}\n{}", stdout1, stderr1);
+    let mut log_lines: Vec<String> = out1.lines().map(|l| l.to_string()).collect();
+
+    // Check for FAIL in output — upstream test1 returns FASTBOOT_FAIL on failure
+    let unlock_failed = out1.contains("FAIL") || code1 != 0;
+    if unlock_failed {
+        return Ok(ExploitResult {
+            success: false,
+            stage: "unlock".into(),
+            message: format!("Unlock command failed (exit code {}). Device not rebooted.", code1),
+            log_lines,
+        });
+    }
+
+    // Step 2: Only reboot if unlock succeeded
+    let (code2, stdout2, stderr2) = run_xperable(
+        &app,
+        &["-B", "-c", "reboot", "-1"],
+    ).await?;
+    let out2 = format!("{}\n{}", stdout2, stderr2);
+    log_lines.extend(out2.lines().map(|l| l.to_string()));
 
     Ok(ExploitResult {
-        success: code == 0,
+        success: code2 == 0,
         stage: "unlock".into(),
-        message: if code == 0 {
+        message: if code2 == 0 {
             "Bootloader unlock command sent, device rebooting".into()
         } else {
-            format!("Unlock failed (exit code {})", code)
+            format!("Unlock succeeded but reboot failed (exit code {})", code2)
         },
         log_lines,
     })
@@ -224,20 +274,40 @@ pub async fn unlock_bootloader(app: AppHandle) -> Result<ExploitResult, String> 
 /// Re-lock bootloader (requires exploit to have run first)
 #[tauri::command]
 pub async fn relock_bootloader(app: AppHandle) -> Result<ExploitResult, String> {
-    let (code, stdout, stderr) = run_xperable(
+    // Step 1: Send the re-lock command only (no reboot yet)
+    let (code1, stdout1, stderr1) = run_xperable(
         &app,
-        &["-B", "-c", "oem unlock X", "-1", "-c", "reboot", "-1"],
+        &["-B", "-c", "oem unlock X", "-1"],
     ).await?;
-    let all_output = format!("{}\n{}", stdout, stderr);
-    let log_lines: Vec<String> = all_output.lines().map(|l| l.to_string()).collect();
+    let out1 = format!("{}\n{}", stdout1, stderr1);
+    let mut log_lines: Vec<String> = out1.lines().map(|l| l.to_string()).collect();
+
+    // Check for FAIL in output
+    let relock_failed = out1.contains("FAIL") || code1 != 0;
+    if relock_failed {
+        return Ok(ExploitResult {
+            success: false,
+            stage: "relock".into(),
+            message: format!("Re-lock command failed (exit code {}). Device not rebooted.", code1),
+            log_lines,
+        });
+    }
+
+    // Step 2: Only reboot if re-lock succeeded
+    let (code2, stdout2, stderr2) = run_xperable(
+        &app,
+        &["-B", "-c", "reboot", "-1"],
+    ).await?;
+    let out2 = format!("{}\n{}", stdout2, stderr2);
+    log_lines.extend(out2.lines().map(|l| l.to_string()));
 
     Ok(ExploitResult {
-        success: code == 0,
+        success: code2 == 0,
         stage: "relock".into(),
-        message: if code == 0 {
+        message: if code2 == 0 {
             "Bootloader re-lock command sent, device rebooting".into()
         } else {
-            format!("Re-lock failed (exit code {})", code)
+            format!("Re-lock succeeded but reboot failed (exit code {})", code2)
         },
         log_lines,
     })
