@@ -1,7 +1,9 @@
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
-use std::process::Command;
+use std::time::Duration;
 use tauri::{AppHandle, Manager};
+use tokio::process::Command;
+use tokio::time::timeout;
 
 /// Device info parsed from xperable -A output
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -53,7 +55,7 @@ fn find_xperable_binary(app: &AppHandle) -> Result<PathBuf, String> {
         }
     }
     // 3. Fallback: look in PATH
-    if let Ok(output) = Command::new("which").arg("xperable").output() {
+    if let Ok(output) = std::process::Command::new("which").arg("xperable").output() {
         if output.status.success() {
             let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
             if !path.is_empty() {
@@ -64,15 +66,28 @@ fn find_xperable_binary(app: &AppHandle) -> Result<PathBuf, String> {
     Err("xperable binary not found. Please build it and place it in the app Resources folder or PATH.".into())
 }
 
-/// Run xperable with given args and capture output
-fn run_xperable(app: &AppHandle, args: &[&str]) -> Result<(i32, String, String), String> {
+/// Default timeout for xperable operations (seconds)
+const XPERABLE_TIMEOUT_SECS: u64 = 120;
+
+/// Run xperable with given args asynchronously with timeout
+async fn run_xperable(app: &AppHandle, args: &[&str]) -> Result<(i32, String, String), String> {
     let bin = find_xperable_binary(app)?;
     log::info!("Running xperable: {:?} {:?}", bin, args);
 
-    let output = Command::new(&bin)
+    let child = Command::new(&bin)
         .args(args)
-        .output()
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
         .map_err(|e| format!("Failed to execute xperable: {}", e))?;
+
+    let output = timeout(
+        Duration::from_secs(XPERABLE_TIMEOUT_SECS),
+        child.wait_with_output(),
+    )
+    .await
+    .map_err(|_| format!("xperable timed out after {}s", XPERABLE_TIMEOUT_SECS))?
+    .map_err(|e| format!("Failed to wait for xperable: {}", e))?;
 
     let code = output.status.code().unwrap_or(-1);
     let stdout = String::from_utf8_lossy(&output.stdout).to_string();
@@ -124,7 +139,7 @@ fn parse_getvar_all(stderr: &str) -> DeviceInfo {
 #[tauri::command]
 pub async fn detect_device(app: AppHandle) -> Result<bool, String> {
     // Try running xperable -B; if it succeeds, device is present
-    let result = run_xperable(&app, &["-B"]);
+    let result = run_xperable(&app, &["-B"]).await;
     match result {
         Ok((code, _, stderr)) => {
             Ok(code == 0 && stderr.contains("version-bootloader:"))
@@ -136,7 +151,7 @@ pub async fn detect_device(app: AppHandle) -> Result<bool, String> {
 /// Get full device info via xperable -A
 #[tauri::command]
 pub async fn get_device_info(app: AppHandle) -> Result<DeviceInfo, String> {
-    let (code, stdout, stderr) = run_xperable(&app, &["-A"])?;
+    let (code, stdout, stderr) = run_xperable(&app, &["-A"]).await?;
     // xperable outputs getvar info to stdout
     let combined = format!("{}\n{}", stdout, stderr);
     let info = parse_getvar_all(&combined);
@@ -154,7 +169,7 @@ pub async fn get_device_info(app: AppHandle) -> Result<DeviceInfo, String> {
 #[tauri::command]
 pub async fn run_exploit(app: AppHandle) -> Result<ExploitResult, String> {
     // Step 1: Get device info to determine platform
-    let (_, stdout, stderr) = run_xperable(&app, &["-A"])?;
+    let (_, stdout, stderr) = run_xperable(&app, &["-A"]).await?;
     let combined = format!("{}\n{}", stdout, stderr);
     let info = parse_getvar_all(&combined);
 
@@ -167,7 +182,7 @@ pub async fn run_exploit(app: AppHandle) -> Result<ExploitResult, String> {
 
     // Step 2: Run the exploit
     // -B sets up the target (required before test4/test5), then exploit_flag runs the actual exploit
-    let (code, stdout2, stderr2) = run_xperable(&app, &["-B", exploit_flag])?;
+    let (code, stdout2, stderr2) = run_xperable(&app, &["-B", exploit_flag]).await?;
     let all_output = format!("{}\n{}", stdout2, stderr2);
     let log_lines: Vec<String> = all_output.lines().map(|l| l.to_string()).collect();
 
@@ -189,8 +204,8 @@ pub async fn run_exploit(app: AppHandle) -> Result<ExploitResult, String> {
 pub async fn unlock_bootloader(app: AppHandle) -> Result<ExploitResult, String> {
     let (code, stdout, stderr) = run_xperable(
         &app,
-        &["-c", "oem unlock Y", "-1", "-c", "reboot", "-1"],
-    )?;
+        &["-B", "-c", "oem unlock Y", "-1", "-c", "reboot", "-1"],
+    ).await?;
     let all_output = format!("{}\n{}", stdout, stderr);
     let log_lines: Vec<String> = all_output.lines().map(|l| l.to_string()).collect();
 
@@ -211,8 +226,8 @@ pub async fn unlock_bootloader(app: AppHandle) -> Result<ExploitResult, String> 
 pub async fn relock_bootloader(app: AppHandle) -> Result<ExploitResult, String> {
     let (code, stdout, stderr) = run_xperable(
         &app,
-        &["-c", "oem unlock X", "-1", "-c", "reboot", "-1"],
-    )?;
+        &["-B", "-c", "oem unlock X", "-1", "-c", "reboot", "-1"],
+    ).await?;
     let all_output = format!("{}\n{}", stdout, stderr);
     let log_lines: Vec<String> = all_output.lines().map(|l| l.to_string()).collect();
 
